@@ -1,0 +1,146 @@
+version: '3'
+
+services:
+  # zookeeper:
+  #   image: wurstmeister/zookeeper
+  #   ports:
+  #     - "2181:2181"
+  #   environment:
+  #     ZOOKEEPER_CLIENT_PORT: 2181
+  #   networks:
+  #     - my-network
+
+  # kafka:
+  #   image: wurstmeister/kafka
+  #   ports:
+  #     - "9092:9092"
+  #   environment:
+  #     KAFKA_LISTENERS: PLAINTEXT://:9092
+  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+  #     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+  #     KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  #     KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+  #     KAFKA_CREATE_TOPICS: "group4:1:1" 
+  #     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  #     KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+  #     KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+  #   depends_on:
+  #     - zookeeper
+  #   networks:
+  #     - my-network
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    restart: always
+    networks:
+      - my-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_BROKER_ID: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    networks:
+      - my-network
+
+  kafkainit:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafkainit
+    command: >
+      /bin/sh -c "kafka-topics --bootstrap-server kafka:29092 --list;
+                  echo -e 'Creating kafka topics';
+                  kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic leie --replication-factor 1 --partitions 1;
+                  kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic meds --replication-factor 1 --partitions 1;
+                  kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic payment --replication-factor 1 --partitions 1;
+                  echo -e 'Successfully created the following topics:';
+                  kafka-topics --bootstrap-server kafka:29092 --list;
+                  tail -f /dev/null;"
+    depends_on:
+      - kafka
+    restart: no
+    networks:
+      - my-network
+  # cassandra:
+  #   image: cassandra:latest
+  #   container_name: cassandra
+  #   ports:
+  #     - "9042:9042"
+  #   environment:
+  #     - CASSANDRA_CLUSTER_NAME=CassandraCluster
+  #     - CASSANDRA_DATACENTER=DataCenter1
+  #     - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+  #     - CASSANDRA_HOST=cassandra
+  #     - CASSANDRA_NUM_TOKENS=128
+  #     - CASSANDRA_RACK=Rack1
+  #     - HEAP_NEWSIZE=128M
+  #     - MAX_HEAP_SIZE=256M
+  #   volumes:
+  #     - ./cql:/cql
+  #   networks:
+  #     - my-network
+
+  # cassandrainit:
+  #   image: cassandra:latest
+  #   volumes:
+  #     - ./cql:/cql
+  #   command: >
+  #     sh -c "echo waiting 80 sec for cassandra to start &&
+  #            sleep 80 &&
+  #            echo loading cassandra keyspace &&
+  #            cqlsh cassandra -f /cql/cassandra-setup.cql &&
+  #            echo finished setting up cassandra tables &&
+  #            tail -f /dev/null"
+  #   networks:
+  #     - my-network
+
+  spark:
+    image: leospark:latest
+    container_name: spark
+    ports:
+    - "4040:4040"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC=leie,meds,payment
+    depends_on:
+      - kafka
+      # - cassandra
+    networks:
+      - my-network
+
+  producer:
+    image: producer:latest
+    depends_on:
+      - kafka
+      - spark
+      # - cassandra
+      - kafkainit
+    networks:
+      - my-network
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    container_name: kafdrop
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: kafka:9092
+    networks:
+      - my-network
+
+networks:
+  my-network:
+    driver: bridge
